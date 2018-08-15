@@ -8,3 +8,7 @@ amethyst = { path = "../amethyst", version = "0.7.0" }
 openvr = "0.5"
 openvr_sys = "2.0.1"
 log = "0.4"
+
+[[example]]
+name = "openvr_example"
+path = "example/main.rs"

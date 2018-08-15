@@ -1,0 +1,9 @@
+#![enable(implicit_some)]
+(
+  dimensions: (1280, 720),
+  fullscreen: false,
+  multisampling: 2,
+  title: "OpenVR Example",
+  visibility: true,
+  vsync: false,
+)
