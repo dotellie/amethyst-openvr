@@ -6,13 +6,14 @@ extern crate openvr_sys;
 
 pub use openvr::ApplicationType;
 
-use amethyst::{Result, Error};
-use amethyst::core::cgmath::{Vector3, Quaternion};
+use amethyst::core::cgmath::{Quaternion, Vector3};
+use amethyst::renderer::{PosNormTangTex, TextureData, TextureMetadata};
+use amethyst::{Error, Result};
 
-use amethyst::xr::{XRBackend, TrackerPositionData};
+use amethyst::xr::{TrackerModelLoadStatus, TrackerPositionData, XRBackend};
 use openvr::{
-    Context, System, Compositor, RenderModels, TrackedDevicePoses, TrackedDevicePose,
-    TrackingUniverseOrigin, init,
+    init, Compositor, Context, RenderModels, System, TrackedDevicePose, TrackedDevicePoses,
+    TrackingUniverseOrigin,
 };
 
 pub struct OpenVR {
@@ -28,9 +29,7 @@ pub struct OpenVR {
 
 impl OpenVR {
     pub fn is_available() -> bool {
-        unsafe {
-            openvr_sys::VR_IsHmdPresent()
-        }
+        unsafe { openvr_sys::VR_IsHmdPresent() }
     }
 
     pub fn init(application_type: ApplicationType) -> Result<OpenVR> {
@@ -188,13 +187,87 @@ impl XRBackend for OpenVR {
     fn get_hidden_area_mesh(&mut self) -> Vec<[f32; 3]> {
         unimplemented!()
     }
+
+    fn tracker_has_model(&mut self, index: u32) -> bool {
+        self.system
+            .string_tracked_device_property(
+                index,
+                openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
+            )
+            .is_ok()
+    }
+
+    fn get_tracker_model(&mut self, index: u32) -> TrackerModelLoadStatus {
+        let render_model_name = if let Ok(name) = self.system.string_tracked_device_property(
+            index,
+            openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
+        ) {
+            name
+        } else {
+            return TrackerModelLoadStatus::Unavailable;
+        };
+
+        if let Ok(maybe_model) = self.render_models.load_render_model(&render_model_name) {
+            if let Some(model) = maybe_model {
+                if let Some(texture_id) = model.diffuse_texture_id() {
+                    if let Ok(Some(texture)) = self.render_models.load_texture(texture_id) {
+                        let vertices = convert_vertices(model.vertices());
+                        let indices = model.indices().to_vec();
+
+                        let (w, h) = texture.dimensions();
+                        // TODO: specify format
+                        let texture = TextureData::U8(
+                            texture.data().to_vec(),
+                            TextureMetadata::default().with_size(w, h),
+                        );
+
+                        TrackerModelLoadStatus::Available(
+                            (vertices, indices),
+                            Some(texture),
+                        )
+                    } else {
+                        TrackerModelLoadStatus::Pending
+                    }
+                } else {
+                    let vertices = convert_vertices(model.vertices());
+                    let indices = model.indices().to_vec();
+
+                    println!("{:?}", model.indices());
+
+                    TrackerModelLoadStatus::Available((vertices, indices), None)
+                }
+            } else {
+                TrackerModelLoadStatus::Pending
+            }
+        } else {
+            TrackerModelLoadStatus::Unavailable
+        }
+    }
 }
 
 #[inline]
-pub fn copysign(a: f32, b: f32) -> f32 {
+fn copysign(a: f32, b: f32) -> f32 {
     if b == 0.0 {
         0.0
     } else {
         a.abs() * b.signum()
     }
+}
+
+#[inline]
+fn convert_vertices(vertices: &[openvr::render_models::Vertex]) -> Vec<PosNormTangTex> {
+    vertices
+        .iter()
+        .map(|v| {
+            let normal_vector = Vector3::from(v.normal);
+            let up = Vector3::from([0.0, 1.0, 0.0]);
+            let tangent = normal_vector.cross(up).cross(normal_vector).into();
+            PosNormTangTex {
+                position: v.position,
+                normal: v.normal,
+                tangent,
+                tex_coord: v.texture_coord,
+            }
+        })
+        .collect()
 }
