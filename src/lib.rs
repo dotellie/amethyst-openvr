@@ -232,8 +232,6 @@ impl XRBackend for OpenVR {
                     let vertices = convert_vertices(model.vertices());
                     let indices = model.indices().to_vec();
 
-                    println!("{:?}", model.indices());
-
                     TrackerModelLoadStatus::Available((vertices, indices), None)
                 }
             } else {
@@ -258,15 +256,16 @@ fn copysign(a: f32, b: f32) -> f32 {
 fn convert_vertices(vertices: &[openvr::render_models::Vertex]) -> Vec<PosNormTangTex> {
     vertices
         .iter()
-        .map(|v| {
-            let normal_vector = Vector3::from(v.normal);
+        .map(|vert| {
+            let normal_vector = Vector3::from(vert.normal);
             let up = Vector3::from([0.0, 1.0, 0.0]);
             let tangent = normal_vector.cross(up).cross(normal_vector).into();
+            let [u, v] = vert.texture_coord;
             PosNormTangTex {
-                position: v.position,
-                normal: v.normal,
+                position: vert.position,
+                normal: vert.normal,
                 tangent,
-                tex_coord: v.texture_coord,
+                tex_coord: [u, 1.0 - v],
             }
         })
         .collect()

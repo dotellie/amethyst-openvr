@@ -25,7 +25,7 @@ impl<'a, 'b> State<GameData<'a, 'b>> for VRExample {
         let StateData { world, .. } = data;
 
         let transform =
-            Matrix4::from_translation([0.0, 7.0, 0.0].into()) * Matrix4::from_angle_x(Deg(-90.));
+            Matrix4::from_translation([-1.5, 1.0, -1.0].into()) * Matrix4::from_angle_y(Deg(90.0)) * Matrix4::from_angle_x(Deg(-90.0));
 
         world
             .create_entity()
@@ -34,7 +34,7 @@ impl<'a, 'b> State<GameData<'a, 'b>> for VRExample {
             .build();
 
         let light1: Light = PointLight {
-            intensity: 6.0,
+            intensity: 1.0,
             color: [0.9, 0.9, 0.9].into(),
             ..PointLight::default()
         }.into();
