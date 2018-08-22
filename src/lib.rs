@@ -10,10 +10,10 @@ use amethyst::core::cgmath::{Quaternion, Vector3};
 use amethyst::renderer::{PosNormTangTex, TextureData, TextureMetadata};
 use amethyst::{Error, Result};
 
-use amethyst::xr::{TrackerModelLoadStatus, TrackerPositionData, XRBackend};
+use amethyst::xr::{TrackerCapabilities, TrackerModelLoadStatus, TrackerPositionData, XRBackend};
 use openvr::{
-    init, Compositor, Context, RenderModels, System, TrackedDevicePose, TrackedDevicePoses,
-    TrackingUniverseOrigin,
+    init, Compositor, Context, RenderModels, System, TrackedDeviceClass, TrackedDevicePose,
+    TrackedDevicePoses, TrackingUniverseOrigin,
 };
 
 pub struct OpenVR {
@@ -188,15 +188,6 @@ impl XRBackend for OpenVR {
         unimplemented!()
     }
 
-    fn tracker_has_model(&mut self, index: u32) -> bool {
-        self.system
-            .string_tracked_device_property(
-                index,
-                openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
-            )
-            .is_ok()
-    }
-
     fn get_tracker_model(&mut self, index: u32) -> TrackerModelLoadStatus {
         let render_model_name = if let Ok(name) = self.system.string_tracked_device_property(
             index,
@@ -221,10 +212,7 @@ impl XRBackend for OpenVR {
                             TextureMetadata::default().with_size(w, h),
                         );
 
-                        TrackerModelLoadStatus::Available(
-                            (vertices, indices),
-                            Some(texture),
-                        )
+                        TrackerModelLoadStatus::Available((vertices, indices), Some(texture))
                     } else {
                         TrackerModelLoadStatus::Pending
                     }
@@ -239,6 +227,25 @@ impl XRBackend for OpenVR {
             }
         } else {
             TrackerModelLoadStatus::Unavailable
+        }
+    }
+
+    fn get_tracker_capabilities(&mut self, index: u32) -> TrackerCapabilities {
+        let has_render_model = if cfg!(windows) {
+            self.system
+                .string_tracked_device_property(
+                    index,
+                    openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
+                )
+                .is_ok()
+        } else {
+            false
+        };
+        let is_camera = self.system.tracked_device_class(index) == TrackedDeviceClass::HMD;
+
+        TrackerCapabilities {
+            has_render_model,
+            is_camera,
         }
     }
 }

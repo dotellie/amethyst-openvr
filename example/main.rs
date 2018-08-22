@@ -8,7 +8,8 @@ use amethyst::core::transform::{GlobalTransform, Transform, TransformBundle};
 use amethyst::input::{is_close_requested, is_key_down, InputBundle};
 use amethyst::prelude::*;
 use amethyst::renderer::{
-    Camera, DrawPbm, Event, Light, PointLight, PosNormTangTex, Projection, VirtualKeyCode,
+    ActiveCamera, Camera, DrawPbm, Event, Light, PointLight, PosNormTangTex, Projection,
+    VirtualKeyCode,
 };
 use amethyst::ui::UiBundle;
 use amethyst::utils::fps_counter::FPSCounterBundle;
@@ -24,14 +25,13 @@ impl<'a, 'b> State<GameData<'a, 'b>> for VRExample {
     fn on_start(&mut self, data: StateData<GameData>) {
         let StateData { world, .. } = data;
 
-        let transform =
-            Matrix4::from_translation([-1.5, 1.0, -1.0].into()) * Matrix4::from_angle_y(Deg(90.0)) * Matrix4::from_angle_x(Deg(-90.0));
-
-        world
+        let cam = world
             .create_entity()
-            .with(GlobalTransform(transform.into()))
+            .with(Transform::default())
             .with(Camera::from(Projection::perspective(1.3, Deg(60.0))))
             .build();
+
+        world.add_resource(ActiveCamera { entity: cam });
 
         let light1: Light = PointLight {
             intensity: 1.0,
