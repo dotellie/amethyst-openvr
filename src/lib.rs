@@ -6,11 +6,16 @@ extern crate openvr_sys;
 
 pub use openvr::ApplicationType;
 
+use std::ffi::CStr;
+
 use amethyst::core::cgmath::{Quaternion, Vector3};
 use amethyst::renderer::{PosNormTangTex, TextureData, TextureMetadata};
 use amethyst::{Error, Result};
 
-use amethyst::xr::{TrackerCapabilities, TrackerModelLoadStatus, TrackerPositionData, XRBackend};
+use amethyst::xr::{
+    TrackerCapabilities, TrackerComponentModelInfo, TrackerModelLoadStatus, TrackerPositionData,
+    XRBackend,
+};
 use openvr::{
     init, Compositor, Context, RenderModels, System, TrackedDeviceClass, TrackedDevicePose,
     TrackedDevicePoses, TrackingUniverseOrigin,
@@ -49,6 +54,57 @@ impl OpenVR {
 
             registered_trackers: None,
         })
+    }
+
+    fn load_model(&self, model_name: &CStr) -> Result<Option<TrackerComponentModelInfo>> {
+        if let Some(model) = self.render_models.load_render_model(&render_model_name)? {
+            if let Some(texture_id) = model.diffuse_texture_id() {
+                if let Ok(maybe_texture) = self.render_models.load_texture(texture_id) {
+                    if let Some(texture) = maybe_texture {
+                        let vertices = convert_vertices(model.vertices());
+                        let indices = model.indices().to_vec();
+
+                        let (w, h) = texture.dimensions();
+                        // TODO: specify format
+                        let texture = TextureData::U8(
+                            texture.data().to_vec(),
+                            TextureMetadata::default().with_size(w, h),
+                        );
+
+                        Ok(Some(TrackerComponentModelInfo {
+                            component_name: model_name.into_string().ok(),
+                            vertices,
+                            indices,
+                            texture: Some(texture),
+                        }))
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    let vertices = convert_vertices(model.vertices());
+                    let indices = model.indices().to_vec();
+
+                    Ok(Some(TrackerComponentModelInfo {
+                        component_name: model_name.into_string().ok(),
+                        vertices,
+                        indices,
+                        texture: None,
+                    }))
+                }
+            } else {
+                let vertices = convert_vertices(model.vertices());
+                let indices = model.indices().to_vec();
+
+                Ok(Some(TrackerComponentModelInfo {
+                    component_name: model_name.into_string().ok(),
+                    vertices,
+                    indices,
+                    texture: None,
+                }))
+            }
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -198,49 +254,44 @@ impl XRBackend for OpenVR {
             return TrackerModelLoadStatus::Unavailable;
         };
 
-        if let Ok(maybe_model) = self.render_models.load_render_model(&render_model_name) {
-            if let Some(model) = maybe_model {
-                if let Some(texture_id) = model.diffuse_texture_id() {
-                    if let Ok(Some(texture)) = self.render_models.load_texture(texture_id) {
-                        let vertices = convert_vertices(model.vertices());
-                        let indices = model.indices().to_vec();
+        let component_count = self.render_models.component_count(&render_model_name);
 
-                        let (w, h) = texture.dimensions();
-                        // TODO: specify format
-                        let texture = TextureData::U8(
-                            texture.data().to_vec(),
-                            TextureMetadata::default().with_size(w, h),
-                        );
-
-                        TrackerModelLoadStatus::Available((vertices, indices), Some(texture))
-                    } else {
-                        TrackerModelLoadStatus::Pending
-                    }
+        if component_count == 0 {
+            if let Ok(maybe_model_info) = self.load_model(render_model_name) {
+                if let Some(mut model_info) = maybe_model_info {
+                    // A complete render model isn't a component
+                    model_info.component_name = None;
+                    TrackerModelLoadStatus::Available(vec![model_info])
                 } else {
-                    let vertices = convert_vertices(model.vertices());
-                    let indices = model.indices().to_vec();
-
-                    TrackerModelLoadStatus::Available((vertices, indices), None)
+                    TrackerModelLoadStatus::Pending
                 }
             } else {
-                TrackerModelLoadStatus::Pending
+                TrackerModelLoadStatus::Unavailable
             }
         } else {
-            TrackerModelLoadStatus::Unavailable
+            let load_result: Result<_> = (0..component_count)
+                .map(|n| {
+                    self.render_models
+                        .component_name(&render_model_name, n)
+                        .unwrap()
+                })
+                .map(|component_name| self.load_model(component_name))
+                .collect();
+
+            if let Ok(maybe_models) = load_result {
+                let i: i32 = maybe_models;
+            }
         }
     }
 
     fn get_tracker_capabilities(&mut self, index: u32) -> TrackerCapabilities {
-        let has_render_model = if cfg!(windows) {
-            self.system
-                .string_tracked_device_property(
-                    index,
-                    openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
-                )
-                .is_ok()
-        } else {
-            false
-        };
+        let has_render_model = self
+            .system
+            .string_tracked_device_property(
+                index,
+                openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
+            )
+            .is_ok();
         let is_camera = self.system.tracked_device_class(index) == TrackedDeviceClass::HMD;
 
         TrackerCapabilities {
