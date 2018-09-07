@@ -9,9 +9,10 @@ openvr = "0.5"
 openvr_sys = "2"
 log = "0.4"
 
-[patch.crates-io]
-openvr = { path = "../test/rust-openvr" }
-openvr_sys = { path = "../test/rust-openvr-sys" }
+[features]
+nightly = [
+    "amethyst/nightly"
+]
 
 [[example]]
 name = "openvr_example"

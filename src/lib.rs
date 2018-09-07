@@ -57,7 +57,11 @@ impl OpenVR {
     }
 
     fn load_model(&self, model_name: &CStr) -> Result<Option<TrackerComponentModelInfo>> {
-        if let Some(model) = self.render_models.load_render_model(&render_model_name)? {
+        if let Some(model) = self
+            .render_models
+            .load_render_model(&model_name)
+            .map_err(|_| Error::Application)?
+        {
             if let Some(texture_id) = model.diffuse_texture_id() {
                 if let Ok(maybe_texture) = self.render_models.load_texture(texture_id) {
                     if let Some(texture) = maybe_texture {
@@ -72,7 +76,7 @@ impl OpenVR {
                         );
 
                         Ok(Some(TrackerComponentModelInfo {
-                            component_name: model_name.into_string().ok(),
+                            component_name: model_name.to_str().ok().map(String::from),
                             vertices,
                             indices,
                             texture: Some(texture),
@@ -85,7 +89,7 @@ impl OpenVR {
                     let indices = model.indices().to_vec();
 
                     Ok(Some(TrackerComponentModelInfo {
-                        component_name: model_name.into_string().ok(),
+                        component_name: model_name.to_str().ok().map(String::from),
                         vertices,
                         indices,
                         texture: None,
@@ -96,7 +100,7 @@ impl OpenVR {
                 let indices = model.indices().to_vec();
 
                 Ok(Some(TrackerComponentModelInfo {
-                    component_name: model_name.into_string().ok(),
+                    component_name: model_name.to_str().ok().map(String::from),
                     vertices,
                     indices,
                     texture: None,
@@ -244,7 +248,7 @@ impl XRBackend for OpenVR {
         unimplemented!()
     }
 
-    fn get_tracker_model(&mut self, index: u32) -> TrackerModelLoadStatus {
+    fn get_tracker_models(&mut self, index: u32) -> TrackerModelLoadStatus {
         let render_model_name = if let Ok(name) = self.system.string_tracked_device_property(
             index,
             openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
@@ -255,9 +259,10 @@ impl XRBackend for OpenVR {
         };
 
         let component_count = self.render_models.component_count(&render_model_name);
+        println!("components {}", component_count);
 
         if component_count == 0 {
-            if let Ok(maybe_model_info) = self.load_model(render_model_name) {
+            if let Ok(maybe_model_info) = self.load_model(&render_model_name) {
                 if let Some(mut model_info) = maybe_model_info {
                     // A complete render model isn't a component
                     model_info.component_name = None;
@@ -269,33 +274,44 @@ impl XRBackend for OpenVR {
                 TrackerModelLoadStatus::Unavailable
             }
         } else {
-            let load_result: Result<_> = (0..component_count)
+            let load_result: Result<Vec<Option<TrackerComponentModelInfo>>> = (0..component_count)
                 .map(|n| {
                     self.render_models
                         .component_name(&render_model_name, n)
                         .unwrap()
                 })
-                .map(|component_name| self.load_model(component_name))
+                .map(|component_name| self.load_model(&component_name))
                 .collect();
 
-            if let Ok(maybe_models) = load_result {
-                let i: i32 = maybe_models;
+            if let Ok(models) = load_result {
+                let mut infos = Vec::with_capacity(component_count as usize);
+                for maybe_model in models {
+                    if let Some(model) = maybe_model {
+                        infos.push(model);
+                    } else {
+                        return TrackerModelLoadStatus::Pending;
+                    }
+                }
+                TrackerModelLoadStatus::Available(infos)
+            } else {
+                TrackerModelLoadStatus::Unavailable
             }
         }
     }
 
     fn get_tracker_capabilities(&mut self, index: u32) -> TrackerCapabilities {
-        let has_render_model = self
-            .system
-            .string_tracked_device_property(
-                index,
-                openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
-            )
-            .is_ok();
+        let render_model_components = if let Ok(name) = self.system.string_tracked_device_property(
+            index,
+            openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
+        ) {
+            std::cmp::max(self.render_models.component_count(&name), 1)
+        } else {
+            0
+        };
         let is_camera = self.system.tracked_device_class(index) == TrackedDeviceClass::HMD;
 
         TrackerCapabilities {
-            has_render_model,
+            render_model_components,
             is_camera,
         }
     }

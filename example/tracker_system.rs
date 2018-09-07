@@ -1,7 +1,8 @@
 use amethyst::assets::{AssetStorage, Loader};
-use amethyst::core::components::{GlobalTransform, Transform};
+use amethyst::core::components::{Parent, Transform};
 use amethyst::core::shrev::EventChannel;
 use amethyst::core::specs::prelude::*;
+use amethyst::core::WithNamed;
 use amethyst::renderer::{
     ActiveCamera, Material, MaterialDefaults, Mesh, PosNormTangTex, Shape, Texture,
 };
@@ -45,13 +46,12 @@ impl<'a> System<'a> for TrackerSystem {
                     if tracker.is_camera() {
                         updater.insert(active_camera.entity, tracker.clone());
                     } else {
-                        let entity = entities.create();
+                        let mut entity =
+                            updater.create_entity(&*entities).with(Transform::default());
 
                         let mut tracker = tracker.clone();
 
-                        updater.insert(entity, Transform::default());
-
-                        if !tracker.has_model() {
+                        if !tracker.has_models() {
                             // Add default mesh and material if tracker doesn't have any
                             let mesh_data = Shape::Cylinder(32, None)
                                 .generate::<Vec<PosNormTangTex>>(Some((0.1, 0.1, 0.1)));
@@ -64,31 +64,37 @@ impl<'a> System<'a> for TrackerSystem {
                                 ..material_defaults.0.clone()
                             };
 
-                            updater.insert(entity, mesh);
-                            updater.insert(entity, material);
+                            entity = entity.with(mesh).with(material);
                         } else {
                             tracker.set_render_model_enabled(true);
                         }
 
-                        updater.insert(entity, tracker);
+                        entity.with(tracker);
                     }
                 }
                 XREvent::TrackerModelLoaded(index) => {
                     for (entity, tracker) in (&*entities, &trackers).join() {
                         if tracker.id() == *index {
-                            let mesh = tracker.mesh().unwrap();
+                            for (component_name, mesh, maybe_texture) in tracker.component_models()
+                            {
+                                let texture = maybe_texture.clone().unwrap_or_else(|| {
+                                    loader.load_from_data([1.0; 4].into(), (), &textures)
+                                });
 
-                            let texture = tracker.texture().unwrap_or_else(|| {
-                                loader.load_from_data([1.0; 4].into(), (), &textures)
-                            });
+                                let material = Material {
+                                    albedo: texture,
+                                    ..material_defaults.0.clone()
+                                };
 
-                            let material = Material {
-                                albedo: texture,
-                                ..material_defaults.0.clone()
-                            };
+                                updater
+                                    .create_entity(&*entities)
+                                    .with(mesh.clone())
+                                    .with(material)
+                                    .named(component_name.clone())
+                                    .with(Parent { entity });
 
-                            updater.insert(entity, mesh);
-                            updater.insert(entity, material);
+                                println!("Loaded {}-{}", tracker.id(), component_name);
+                            }
                         }
                     }
                 }

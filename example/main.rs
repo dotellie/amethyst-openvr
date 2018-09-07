@@ -8,7 +8,7 @@ use amethyst::core::transform::{GlobalTransform, Transform, TransformBundle};
 use amethyst::input::{is_close_requested, is_key_down, InputBundle};
 use amethyst::prelude::*;
 use amethyst::renderer::{
-    ActiveCamera, Camera, DrawPbm, Event, Light, PointLight, PosNormTangTex, Projection,
+    ActiveCamera, Camera, DrawPbm, Light, PointLight, PosNormTangTex, Projection,
     VirtualKeyCode,
 };
 use amethyst::ui::UiBundle;
@@ -21,7 +21,7 @@ use amethyst_openvr::{ApplicationType, OpenVR};
 #[derive(Default)]
 struct VRExample;
 
-impl<'a, 'b> State<GameData<'a, 'b>> for VRExample {
+impl<'a, 'b> SimpleState<'a, 'b> for VRExample {
     fn on_start(&mut self, data: StateData<GameData>) {
         let StateData { world, .. } = data;
 
@@ -49,15 +49,17 @@ impl<'a, 'b> State<GameData<'a, 'b>> for VRExample {
             .build();
     }
 
-    fn handle_event(&mut self, _: StateData<GameData>, event: Event) -> Trans<GameData<'a, 'b>> {
-        if is_close_requested(&event) || is_key_down(&event, VirtualKeyCode::Escape) {
-            return Trans::Quit;
+    fn handle_event(&mut self, _: StateData<GameData>, event: StateEvent<()>) -> SimpleTrans<'a, 'b> {
+        if let StateEvent::Window(event) = event {
+            if is_close_requested(&event) || is_key_down(&event, VirtualKeyCode::Escape) {
+                return Trans::Quit;
+            }
         }
 
         Trans::None
     }
 
-    fn update(&mut self, data: StateData<GameData>) -> Trans<GameData<'a, 'b>> {
+    fn update(&mut self, data: &mut StateData<GameData>) -> SimpleTrans<'a, 'b> {
         data.data.update(&data.world);
 
         Trans::None
