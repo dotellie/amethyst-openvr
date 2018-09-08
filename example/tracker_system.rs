@@ -91,7 +91,8 @@ impl<'a> System<'a> for TrackerSystem {
                                     .with(mesh.clone())
                                     .with(material)
                                     .named(component_name.clone())
-                                    .with(Parent { entity });
+                                    .with(Parent { entity })
+                                    .with(Transform::default());
 
                                 println!("Loaded {}-{}", tracker.id(), component_name);
                             }

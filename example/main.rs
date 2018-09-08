@@ -8,8 +8,7 @@ use amethyst::core::transform::{GlobalTransform, Transform, TransformBundle};
 use amethyst::input::{is_close_requested, is_key_down, InputBundle};
 use amethyst::prelude::*;
 use amethyst::renderer::{
-    ActiveCamera, Camera, DrawPbm, Light, PointLight, PosNormTangTex, Projection,
-    VirtualKeyCode,
+    ActiveCamera, Camera, DrawPbm, Light, PointLight, PosNormTangTex, Projection, VirtualKeyCode,
 };
 use amethyst::ui::UiBundle;
 use amethyst::utils::fps_counter::FPSCounterBundle;
@@ -49,7 +48,11 @@ impl<'a, 'b> SimpleState<'a, 'b> for VRExample {
             .build();
     }
 
-    fn handle_event(&mut self, _: StateData<GameData>, event: StateEvent<()>) -> SimpleTrans<'a, 'b> {
+    fn handle_event(
+        &mut self,
+        _: StateData<GameData>,
+        event: StateEvent<()>,
+    ) -> SimpleTrans<'a, 'b> {
         if let StateEvent::Window(event) = event {
             if is_close_requested(&event) || is_key_down(&event, VirtualKeyCode::Escape) {
                 return Trans::Quit;
@@ -95,7 +98,9 @@ fn main() -> Result<(), Error> {
         .with_basic_renderer(display_config_path, DrawPbm::<PosNormTangTex>::new(), true)?
         .with_bundle(InputBundle::<String, String>::new())?;
 
-    let mut game = Application::build(resources_directory, VRExample::default())?.build(game_data)?;
+    let mut game = Application::build(resources_directory, VRExample::default())?
+        .register::<amethyst::core::Named>()
+        .build(game_data)?;
     game.run();
 
     Ok(())
