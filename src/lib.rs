@@ -7,6 +7,7 @@ extern crate openvr_sys;
 pub use openvr::ApplicationType;
 
 use std::ffi::CStr;
+use std::result::Result as StdResult;
 
 use amethyst::core::cgmath::{Quaternion, Vector3};
 use amethyst::renderer::{PosNormTangTex, TextureData, TextureMetadata};
@@ -16,6 +17,7 @@ use amethyst::xr::{
     TrackerCapabilities, TrackerComponentModelInfo, TrackerModelLoadStatus, TrackerPositionData,
     XRBackend,
 };
+use openvr::render_models::Error as RenderModelError;
 use openvr::{
     init, Compositor, Context, RenderModels, System, TrackedDeviceClass, TrackedDevicePose,
     TrackedDevicePoses, TrackingUniverseOrigin,
@@ -56,12 +58,11 @@ impl OpenVR {
         })
     }
 
-    fn load_model(&self, model_name: &CStr) -> Result<Option<TrackerComponentModelInfo>> {
-        if let Some(model) = self
-            .render_models
-            .load_render_model(&model_name)
-            .map_err(|_| Error::Application)?
-        {
+    fn load_model(
+        &self,
+        model_name: &CStr,
+    ) -> StdResult<Option<TrackerComponentModelInfo>, RenderModelError> {
+        if let Some(model) = self.render_models.load_render_model(&model_name)? {
             if let Some(texture_id) = model.diffuse_texture_id() {
                 if let Ok(maybe_texture) = self.render_models.load_texture(texture_id) {
                     if let Some(texture) = maybe_texture {
@@ -108,6 +109,50 @@ impl OpenVR {
             }
         } else {
             Ok(None)
+        }
+    }
+
+    fn get_model_full(&self, name: &CStr) -> TrackerModelLoadStatus {
+        if let Ok(maybe_model_info) = self.load_model(&name) {
+            if let Some(mut model_info) = maybe_model_info {
+                // A complete render model isn't a component
+                model_info.component_name = None;
+                TrackerModelLoadStatus::Available(vec![model_info])
+            } else {
+                TrackerModelLoadStatus::Pending
+            }
+        } else {
+            TrackerModelLoadStatus::Unavailable
+        }
+    }
+
+    fn get_model_components(&self, name: &CStr) -> TrackerModelLoadStatus {
+        let component_count = self.render_models.component_count(&name);
+
+        if component_count == 0 {
+            return TrackerModelLoadStatus::Unavailable;
+        }
+
+        let load_result: StdResult<
+            Vec<Option<TrackerComponentModelInfo>>,
+            RenderModelError,
+        > = (0..component_count)
+            .map(|n| self.render_models.component_name(&name, n).unwrap())
+            .map(|component_name| self.load_model(&component_name))
+            .collect();
+
+        if let Ok(models) = load_result {
+            let mut infos = Vec::with_capacity(component_count as usize);
+            for maybe_model in models {
+                if let Some(model) = maybe_model {
+                    infos.push(model);
+                } else {
+                    return TrackerModelLoadStatus::Pending;
+                }
+            }
+            TrackerModelLoadStatus::Available(infos)
+        } else {
+            TrackerModelLoadStatus::Unavailable
         }
     }
 }
@@ -258,44 +303,9 @@ impl XRBackend for OpenVR {
             return TrackerModelLoadStatus::Unavailable;
         };
 
-        let component_count = self.render_models.component_count(&render_model_name);
-        println!("components {}", component_count);
-
-        if component_count == 0 {
-            if let Ok(maybe_model_info) = self.load_model(&render_model_name) {
-                if let Some(mut model_info) = maybe_model_info {
-                    // A complete render model isn't a component
-                    model_info.component_name = None;
-                    TrackerModelLoadStatus::Available(vec![model_info])
-                } else {
-                    TrackerModelLoadStatus::Pending
-                }
-            } else {
-                TrackerModelLoadStatus::Unavailable
-            }
-        } else {
-            let load_result: Result<Vec<Option<TrackerComponentModelInfo>>> = (0..component_count)
-                .map(|n| {
-                    self.render_models
-                        .component_name(&render_model_name, n)
-                        .unwrap()
-                })
-                .map(|component_name| self.load_model(&component_name))
-                .collect();
-
-            if let Ok(models) = load_result {
-                let mut infos = Vec::with_capacity(component_count as usize);
-                for maybe_model in models {
-                    if let Some(model) = maybe_model {
-                        infos.push(model);
-                    } else {
-                        return TrackerModelLoadStatus::Pending;
-                    }
-                }
-                TrackerModelLoadStatus::Available(infos)
-            } else {
-                TrackerModelLoadStatus::Unavailable
-            }
+        match self.get_model_components(&render_model_name) {
+            TrackerModelLoadStatus::Unavailable => self.get_model_full(&render_model_name),
+            load_status => load_status,
         }
     }
 
