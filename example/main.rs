@@ -1,5 +1,6 @@
 extern crate amethyst;
 extern crate amethyst_openvr;
+extern crate amethyst_xr_models;
 
 mod tracker_system;
 
@@ -16,6 +17,8 @@ use amethyst::Error;
 
 use amethyst::xr::{XRBundle, XREvent};
 use amethyst_openvr::{ApplicationType, OpenVR};
+
+use amethyst_xr_models::{XRTrackerModels};
 
 #[derive(Default)]
 struct VRExample;
@@ -96,7 +99,8 @@ fn main() -> Result<(), Error> {
         .with_bundle(UiBundle::<String, String>::new())?
         .with_bundle(FPSCounterBundle::default())?
         .with_basic_renderer(display_config_path, DrawPbm::<PosNormTangTex>::new(), true)?
-        .with_bundle(InputBundle::<String, String>::new())?;
+        .with_bundle(InputBundle::<String, String>::new())?
+        .with(XRTrackerModels, "tracker_models", &[]);
 
     let mut game = Application::build(resources_directory, VRExample::default())?
         .register::<amethyst::core::Named>()

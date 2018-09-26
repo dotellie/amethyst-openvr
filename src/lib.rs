@@ -9,17 +9,18 @@ pub use openvr::ApplicationType;
 use std::ffi::CStr;
 use std::result::Result as StdResult;
 
-use amethyst::core::cgmath::{Quaternion, Vector3};
+use amethyst::core::cgmath::{Matrix4, Quaternion, Vector3};
 use amethyst::renderer::{PosNormTangTex, TextureData, TextureMetadata};
 use amethyst::{Error, Result};
 
 use amethyst::xr::{
-    TrackerCapabilities, TrackerComponentModelInfo, TrackerModelLoadStatus, TrackerPositionData,
-    XRBackend,
+    TrackerCapabilities, TrackerComponentModelInfo, TrackerComponentTextureData,
+    TrackerComponentVertex, TrackerModelLoadStatus, TrackerPositionData, XRBackend, XRTargetInfo,
 };
+use openvr::compositor::texture::{ColorSpace, Handle, Texture};
 use openvr::render_models::Error as RenderModelError;
 use openvr::{
-    init, Compositor, Context, RenderModels, System, TrackedDeviceClass, TrackedDevicePose,
+    init, Compositor, Context, Eye, RenderModels, System, TrackedDeviceClass, TrackedDevicePose,
     TrackedDevicePoses, TrackingUniverseOrigin,
 };
 
@@ -69,12 +70,10 @@ impl OpenVR {
                         let vertices = convert_vertices(model.vertices());
                         let indices = model.indices().to_vec();
 
-                        let (w, h) = texture.dimensions();
-                        // TODO: specify format
-                        let texture = TextureData::U8(
-                            texture.data().to_vec(),
-                            TextureMetadata::default().with_size(w, h),
-                        );
+                        let texture = TrackerComponentTextureData {
+                            data: texture.data().to_vec(),
+                            size: texture.dimensions(),
+                        };
 
                         Ok(Some(TrackerComponentModelInfo {
                             component_name: model_name.to_str().ok().map(String::from),
@@ -155,6 +154,23 @@ impl OpenVR {
             TrackerModelLoadStatus::Unavailable
         }
     }
+
+    fn get_tracker_capabilities(&self, index: u32) -> TrackerCapabilities {
+        let render_model_components = if let Ok(name) = self.system.string_tracked_device_property(
+            index,
+            openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
+        ) {
+            std::cmp::max(self.render_models.component_count(&name), 1)
+        } else {
+            0
+        };
+        let is_camera = self.system.tracked_device_class(index) == TrackedDeviceClass::HMD;
+
+        TrackerCapabilities {
+            render_model_components,
+            is_camera,
+        }
+    }
 }
 
 impl XRBackend for OpenVR {
@@ -174,7 +190,7 @@ impl XRBackend for OpenVR {
         }
     }
 
-    fn get_new_trackers(&mut self) -> Option<Vec<u32>> {
+    fn get_new_trackers(&mut self) -> Option<Vec<(u32, TrackerCapabilities)>> {
         if let Some(ref mut registered_trackers) = self.registered_trackers {
             let mut tracker_data = None;
 
@@ -185,8 +201,10 @@ impl XRBackend for OpenVR {
                             tracker_data = Some(Vec::new());
                         }
 
+                        let index = i as u32;
+
                         registered_trackers[i] = true;
-                        tracker_data.as_mut().unwrap().push(i as u32);
+                        tracker_data.as_mut().unwrap().push(index);
                     }
                 }
             }
@@ -203,14 +221,20 @@ impl XRBackend for OpenVR {
                     let connected = pose.device_is_connected();
                     trackers[i] = connected;
                     if connected {
-                        tracker_data.push(i as u32);
+                        let index = i as u32;
+                        tracker_data.push(index);
                     }
                 }
             }
 
             self.registered_trackers = Some(trackers);
             Some(tracker_data)
-        }
+        }.map(|trackers| {
+            trackers
+                .into_iter()
+                .map(|id| (id, self.get_tracker_capabilities(id)))
+                .collect()
+        })
     }
 
     fn get_removed_trackers(&mut self) -> Option<Vec<u32>> {
@@ -309,20 +333,61 @@ impl XRBackend for OpenVR {
         }
     }
 
-    fn get_tracker_capabilities(&mut self, index: u32) -> TrackerCapabilities {
-        let render_model_components = if let Ok(name) = self.system.string_tracked_device_property(
-            index,
-            openvr_sys::ETrackedDeviceProperty_Prop_RenderModelName_String,
-        ) {
-            std::cmp::max(self.render_models.component_count(&name), 1)
-        } else {
-            0
-        };
-        let is_camera = self.system.tracked_device_class(index) == TrackedDeviceClass::HMD;
+    fn get_gl_target_info(&mut self, near: f32, far: f32) -> Vec<XRTargetInfo> {
+        use amethyst::core::cgmath::SquareMatrix;
 
-        TrackerCapabilities {
-            render_model_components,
-            is_camera,
+        let left_trans = self.system.eye_to_head_transform(Eye::Left);
+        let right_trans = self.system.eye_to_head_transform(Eye::Right);
+        let left_trans = array_to_matrix(extend_matrix_array(left_trans))
+            .invert()
+            .unwrap();
+        let right_trans = array_to_matrix(extend_matrix_array(right_trans))
+            .invert()
+            .unwrap();
+
+        let left_proj = array_to_matrix(self.system.projection_matrix(Eye::Left, near, far));
+        let right_proj = array_to_matrix(self.system.projection_matrix(Eye::Right, near, far));
+
+        let size = self.system.recommended_render_target_size();
+
+        vec![
+            XRTargetInfo {
+                size: size.clone(),
+                view_offset: left_trans,
+                projection: left_proj,
+            },
+            XRTargetInfo {
+                size,
+                view_offset: right_trans,
+                projection: right_proj,
+            },
+        ]
+    }
+
+    fn submit_gl_target(&mut self, target_index: usize, gl_target: usize) {
+        let eye = match target_index {
+            0 => Eye::Left,
+            1 => Eye::Right,
+            _ => {
+                error!(
+                    "Tried to submit frame to eye {} which is invalid",
+                    target_index
+                );
+                return;
+            }
+        };
+
+        // TODO: Check unsafe
+        unsafe {
+            self.compositor.submit(
+                eye,
+                &Texture {
+                    handle: Handle::OpenGLTexture(gl_target),
+                    color_space: ColorSpace::Linear,
+                },
+                None,
+                None,
+            );
         }
     }
 }
@@ -337,7 +402,7 @@ fn copysign(a: f32, b: f32) -> f32 {
 }
 
 #[inline]
-fn convert_vertices(vertices: &[openvr::render_models::Vertex]) -> Vec<PosNormTangTex> {
+fn convert_vertices(vertices: &[openvr::render_models::Vertex]) -> Vec<TrackerComponentVertex> {
     vertices
         .iter()
         .map(|vert| {
@@ -345,12 +410,31 @@ fn convert_vertices(vertices: &[openvr::render_models::Vertex]) -> Vec<PosNormTa
             let up = Vector3::from([0.0, 1.0, 0.0]);
             let tangent = normal_vector.cross(up).cross(normal_vector).into();
             let [u, v] = vert.texture_coord;
-            PosNormTangTex {
+            TrackerComponentVertex {
                 position: vert.position,
                 normal: vert.normal,
                 tangent,
                 tex_coord: [u, 1.0 - v],
             }
-        })
-        .collect()
+        }).collect()
+}
+
+#[inline]
+fn array_to_matrix(arr: [[f32; 4]; 4]) -> Matrix4<f32> {
+    Matrix4::new(
+        arr[0][0], arr[1][0], arr[2][0], arr[3][0],
+        arr[0][1], arr[1][1], arr[2][1], arr[3][1],
+        arr[0][2], arr[1][2], arr[2][2], arr[3][2],
+        arr[0][3], arr[1][3], arr[2][3], arr[3][3],
+    )
+}
+
+#[inline]
+fn extend_matrix_array(arr: [[f32; 4]; 3]) -> [[f32; 4]; 4] {
+    [
+        [arr[0][0], arr[0][1], arr[0][2], arr[0][3]],
+        [arr[1][0], arr[1][1], arr[1][2], arr[1][3]],
+        [arr[2][0], arr[2][1], arr[2][2], arr[2][3]],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 }
