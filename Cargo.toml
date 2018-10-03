@@ -1,3 +1,5 @@
+cargo-features = ["profile-overrides"]
+
 [package]
 name = "amethyst_openvr"
 version = "0.1.0"
@@ -24,3 +26,6 @@ gfx = { path = "../gfx/src/render" }
 gfx_core = { path = "../gfx/src/core"}
 gfx_device_gl = { path = "../gfx/src/backend/gl" }
 gfx_window_glutin = { path = "../gfx/src/window/glutin" }
+
+[profile.dev.overrides."*"]
+opt-level = 3

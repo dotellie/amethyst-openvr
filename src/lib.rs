@@ -10,7 +10,6 @@ use std::ffi::CStr;
 use std::result::Result as StdResult;
 
 use amethyst::core::cgmath::{Matrix4, Quaternion, Vector3};
-use amethyst::renderer::{PosNormTangTex, TextureData, TextureMetadata};
 use amethyst::{Error, Result};
 
 use amethyst::xr::{
@@ -20,12 +19,12 @@ use amethyst::xr::{
 use openvr::compositor::texture::{ColorSpace, Handle, Texture};
 use openvr::render_models::Error as RenderModelError;
 use openvr::{
-    init, Compositor, Context, Eye, RenderModels, System, TrackedDeviceClass, TrackedDevicePose,
-    TrackedDevicePoses, TrackingUniverseOrigin,
+    init, Compositor, Context, Eye, RenderModels, System, TrackedDeviceClass, TrackedDevicePoses,
+    TrackingUniverseOrigin,
 };
 
 pub struct OpenVR {
-    context: Context,
+    _context: Context,
     system: System,
     compositor: Compositor,
     render_models: RenderModels,
@@ -48,7 +47,7 @@ impl OpenVR {
         let render_models = context.render_models().map_err(|_| Error::Application)?;
 
         Ok(OpenVR {
-            context,
+            _context: context,
             system,
             compositor,
             render_models,
@@ -378,7 +377,7 @@ impl XRBackend for OpenVR {
         };
 
         // TODO: Check unsafe
-        unsafe {
+        match unsafe {
             self.compositor.submit(
                 eye,
                 &Texture {
@@ -387,7 +386,10 @@ impl XRBackend for OpenVR {
                 },
                 None,
                 None,
-            );
+            )
+        } {
+            Err(e) => error!("Error submitting frame to OpenVR: {:?}", e),
+            _ => (),
         }
     }
 }
@@ -422,10 +424,8 @@ fn convert_vertices(vertices: &[openvr::render_models::Vertex]) -> Vec<TrackerCo
 #[inline]
 fn array_to_matrix(arr: [[f32; 4]; 4]) -> Matrix4<f32> {
     Matrix4::new(
-        arr[0][0], arr[1][0], arr[2][0], arr[3][0],
-        arr[0][1], arr[1][1], arr[2][1], arr[3][1],
-        arr[0][2], arr[1][2], arr[2][2], arr[3][2],
-        arr[0][3], arr[1][3], arr[2][3], arr[3][3],
+        arr[0][0], arr[1][0], arr[2][0], arr[3][0], arr[0][1], arr[1][1], arr[2][1], arr[3][1],
+        arr[0][2], arr[1][2], arr[2][2], arr[3][2], arr[0][3], arr[1][3], arr[2][3], arr[3][3],
     )
 }
 

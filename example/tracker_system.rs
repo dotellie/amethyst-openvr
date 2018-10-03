@@ -5,7 +5,6 @@ use amethyst::core::specs::prelude::*;
 use amethyst::renderer::{
     ActiveCamera, Material, MaterialDefaults, Mesh, PosNormTangTex, Shape, Texture,
 };
-use amethyst::xr::components::TrackingDevice;
 use amethyst::xr::XREvent;
 
 use amethyst_xr_models::XRModelEnabled;
@@ -24,7 +23,6 @@ impl<'a> System<'a> for TrackerSystem {
         Read<'a, AssetStorage<Mesh>>,
         Read<'a, AssetStorage<Texture>>,
         ReadExpect<'a, MaterialDefaults>,
-        ReadStorage<'a, TrackingDevice>,
         ReadExpect<'a, ActiveCamera>,
     );
 
@@ -37,7 +35,6 @@ impl<'a> System<'a> for TrackerSystem {
             meshes,
             textures,
             material_defaults,
-            trackers,
             active_camera,
         ) = system_data;
 
